@@ -25,7 +25,6 @@ module Model (
     Action(..), Direction(..),
     stepper, eventManager,
     mash, mashMany, mergePixel, withinBounds,
-    module Species
 )
 
 where
@@ -306,8 +305,8 @@ class Renderable a where
     -- second option is the only option...
     -- it is a little inconsistent but it works fine.
     -- note that I should keep the Writer to renderWorld and make render only return image data
-    render :: (MonadReader W m) => {-forall b.-} a -> m GreatImage
-    renderAt :: (MonadReader W m) => {-forall b.-} Coord -> a -> m GreatImage
+    render :: (MonadReader W m, MonadIO m) => {-forall b.-} a -> m GreatImage
+    renderAt :: (MonadReader W m, MonadIO m) => {-forall b.-} Coord -> a -> m GreatImage
     renderAt c1 a = render a >>= return . moveImage c1
     --render :: (Monad m) => a -> ReaderT W m GreatImage
     --renderAt :: MonadReader W m => Coord -> a -> m GreatImage
@@ -352,7 +351,7 @@ renderWorld w = do
                     -- ima write some things
                     m <- asks $ emapTileGrid . _wMap
                     (xl,yl) <- asks _wLoc
-                    asks _wTimeI >>= liftIO . print 
+                    --asks _wTimeI >>= liftIO . print 
                     --liftIO $ print m
                     let f x y = fmap (moveImage (x*24,y*24) . liftTarr) $ M.lookup (x,y) m
                     tell $ mconcat $ catMaybes $ f <$> [-3..3] <*> [-3..3]
@@ -419,6 +418,8 @@ moveImage :: Coord -> GreatImage -> GreatImage
 moveImage c1 (GreatImage c p) = GreatImage (cadd c1 c) p
 mapImage :: (Pixelarr -> Pixelarr) -> GreatImage -> GreatImage
 mapImage f (GreatImage c p) = GreatImage c (f p)
+mapCoord :: (Coord -> Coord) -> GreatImage -> GreatImage
+mapCoord f (GreatImage c p) = GreatImage (f c) p
 newBlankImage :: Coord -> DIM2 -> GreatImage
 newBlankImage c size = GreatImage c (fromFunction size (const (0,0,0,0)))
 
@@ -477,7 +478,7 @@ instance Renderable UI where
 --    let text = undefined
 --    background <> text
 
-renderTwoLineTextBox :: MonadReader W m => DIM1 -> String -> m GreatImage
+renderTwoLineTextBox :: (MonadReader W m, MonadIO m) => DIM1 -> String -> m GreatImage
 renderTwoLineTextBox sh@(Z:.x) string = do
     let background = GreatImage (0,0) $ rect (sh:.20)
     --let string1 = if length string > 
@@ -486,27 +487,30 @@ renderTwoLineTextBox sh@(Z:.x) string = do
     return $ background <> text
 
 -- shape is the x length. the height is 20, with one pixel of buffer on either side of the text
-renderOneLineTextBox :: MonadReader W m => DIM1 -> String -> m GreatImage
+renderOneLineTextBox :: (MonadReader W m, MonadIO m) => DIM1 -> String -> m GreatImage
 renderOneLineTextBox sh@(Z:.x) string = do
     let background = GreatImage (0,0) $ rect (sh:.20)
     text <- return . mapImage (extract (Z:.0:.0) (Z:.x-2:.20-2)) =<< render string
     text1 <- render string
-    return $ printThing "a" "a"
+    liftIO $ print "a"
+    --return $ printThing "a" "a"
     return $ background <> text
 
 instance Renderable [Char] where
-    render str = {- execWriterT $ -} -- maybe if I leave the Writer in there it'll be processed normally?
+    render str = do {- execWriterT $ -} -- maybe if I leave the Writer in there it'll be processed normally?
+        liftIO $ putStrLn $ "Rendered string: " <> str
         foldM (\(diff,img) char -> render char >>= \x -> return (diff+1,img <> cshift (9*diff,0) x)) (0,mempty) str >>= return . snd
 
 instance Renderable Char where
     render char = do -- return mempty --this is where I actually chicken out
         let (x,y) = (9,16) `cmult` (maybe (0,2) id $ M.lookup char charTable)
-        return $ printThing " " $ show $ M.lookup char charTable
+        liftIO $ putStrLn $ "Rendering char: " <> show char
+        liftIO $ print $ "Char looked up: " <> (show $ M.lookup char charTable)
         img <- asks _wFontmap
         return $ GreatImage (0,0) $ extract (Z:.x:.y) (Z:.9:.16) img
-printThing :: Show b => String -> b -> String
-printThing a = unsafePerformIO . (\x -> putStrLn x >> return a) . (a<>) . show
-{-# NOINLINE printThing #-}
+--printThing :: Show b => String -> b -> String
+--printThing a = unsafePerformIO . (\x -> putStrLn x >> return a) . (a<>) . show
+--{-# NOINLINE printThing #-}
 
 
 --------------------------------------------------------------------------------
