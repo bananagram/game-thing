@@ -1,4 +1,4 @@
-~~Read at your own risk!~~
+######~~Read at your own risk!~~
 
 
 
@@ -12,7 +12,7 @@ Project that serves as a project for school. Written in Haskell because Haskell 
 Woefully incomplete. Horrendously unperformant. 
 
 
-Files:
+##Files
 
 `Chars.hs` contains the bulky mapping of letters to specific locations in the fontmap, allowing me to display letters. Not a map I want in a file that will be read.
 `Loadmap.hs` contains a few functions, used by Main, that use IO extensively. They load images to be inserted into the world. This seperates the IO from the more pure functions in Model; most of the IO functions in Model have IO only for debugging.
