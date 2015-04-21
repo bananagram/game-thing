@@ -9,7 +9,7 @@
 
 A project that serves as a school project. It's written in Haskell because Haskell is awesome, with the purpose of giving me a base to build a game out of. 
 
-Woefully incomplete. Horrendously unperformant. 
+Woefully incomplete. Horrendously unperformant. Terribly outclassed.
 
 
 ##Files
