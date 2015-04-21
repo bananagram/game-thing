@@ -32,5 +32,5 @@ Licensed under the MIT license I think, not that it matters. I would use the WTF
 	- lens
 - Any remotely new GHC and cabal-install
 
-Ideal installation flags: `ghc dun2 -Odph -rtsopts -threaded -fno-liberate-case -funfolding-use-threshold1000 -funfolding-keeness-factor1000 -fllvm -optlo-O3`
+Ideal installation flags: `ghc dun2 -Odph -rtsopts -threaded -fno-liberate-case -funfolding-use-threshold1000 -funfolding-keeness-factor1000 -fllvm -optlo-O3`. 
 Leave out `-fllvm` if you're on Windows or otherwise don't have LLVM. 
