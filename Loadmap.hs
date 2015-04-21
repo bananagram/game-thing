@@ -2,7 +2,8 @@
 
 module Loadmap (
     loadEasyMap,
-    loadFontmap
+    loadFontmap,
+    loadSprites
     --loadGameMap,
     --makeTileMap,
     --loadTilesetImage
@@ -117,8 +118,25 @@ emptyPixel = (1,1,1)
 
 
 -- Sprites
--- 
 
+--emptyTile = computeUnboxedS $ fromFunction (Z:.0:.0) (const (0,0,0,0))
+extract' a b c = computeUnboxedS $ extract a b c
+s24pix = Z:.24:.24
+get24 sh arr = extract' sh s24pix arr
+-- I must load the sprites somehow and store them in hte world
+
+-- I will have a single sprite sheet. Simple sprites there.
+
+--a bunch of tilearrs that are referred to by strings, as well as a normal one
+
+loadSprites :: IO (M.Map String Sprite)
+loadSprites = do
+    spriteArr <- readImageFromBMP "assets/spritemap.bmp" >>= return . alphatize . flipHV . transpose . either (error . show) id
+    let arr = spriteArr
+    let playerSprite = Sprite (get24 (Z:.0:.0) arr) $ M.fromList [("f1",get24 (Z:.0:.0) arr),("f2",get24 (Z:.24:.0) arr),("f3",get24 (Z:.48:.0) arr)]
+    let emptySprite = Sprite emptyTile M.empty
+    let dotSprite = Sprite (extract' (Z:.0:.48) s24pix spriteArr) mempty
+    return $ M.fromList [("player",playerSprite),("empty",emptySprite),("dot",dotSprite)]
 
 
 

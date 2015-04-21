@@ -18,12 +18,14 @@ import Loadmap
 
 
 
-
+main :: IO ()
 main = do
     map <- loadEasyMap
     --let (Just tile) = M.lookup (0,0) (emapTileGrid map)
     --let coloredTile = R.map pix2col $ tarr2parr tile
     fontmap <- loadFontmap
+    sprites <- loadSprites
+
     let initUI = UI {
           _uiMode = ""
         , _uiListPlace = 0
@@ -40,7 +42,7 @@ main = do
         , _wKeyset = Keyset mempty mempty
         , _wEntities = mempty
         , _wMap = map
-        , _wSprites = mempty
+        , _wSprites = sprites
         , _wFontmap = delay fontmap}
     
     --let tick = execStateT tickFunction

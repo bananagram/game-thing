@@ -42,7 +42,7 @@ import qualified Data.Map as M
 import Data.Map (Map)
 --import qualified Data.IntMap as IM
 --import Data.IntMap (IntMap)
-import Data.Array.Repa
+import Data.Array.Repa hiding (map)
 import qualified Data.Array.Repa as Repa
 import Data.Word
 import Graphics.Gloss.Interface.IO.Game
@@ -57,6 +57,7 @@ import Control.Monad.Writer hiding (Any,All)
 import Control.Monad.State
 import Control.Lens hiding (traverse)
 import System.IO.Unsafe
+import Debug.Trace
 -- wtf man, why doesn't this work?
 --{-# LANGUAGE TupleSections #-}
 --a = (1,)
@@ -170,8 +171,8 @@ type Animation = Map String AnimBehavior
 
 data AnimBehavior = 
     Still FrameID
-    -- sequence of frames, each frame going one frame 
-    | Changing (Seq FrameID) 
+    -- sequence of frames, each frame going x frames 
+    | Changing Int (Seq FrameID) 
     -- length of animation in frames for convenience, and how long until the frame expires and changes
     -- assuming 30 FPS for now
     | Dynamic Int [(Int,FrameID)] deriving (Show)
@@ -212,16 +213,20 @@ data SpriteConstructor = SpriteConstructor {
 }
 --must include data for how it attacks too. what order its frames display in
 --frame behavior is encoded in the same way as the animations
-data Sprite = Sprite {
-    sprFrames :: M.Map FrameID Tilearr --wish I could make this a function, but that isn't showable
-    , sprDef:: Tilearr
+data Sprite = Sprite 
+    { sprDef :: Tilearr
+    , sprFrames :: M.Map FrameID Tilearr --wish I could make this a function, but that isn't showable
 } deriving (Show)
-data FrameID =
-    BlankFrame
-    | InitFrame
-    | Sleeping1
-    | Sleeping2
-    deriving (Show,Eq,Ord)
+
+type FrameID = String
+
+--data FrameID =
+--    BlankFrame
+--    | InitFrame
+--    | Sleeping1
+--    | Sleeping2
+--    deriving (Show,Eq,Ord)
+
 
 
 -- what would be in the UI? 
@@ -429,12 +434,16 @@ instance Show Entity where
 instance Renderable Entity where
     --render = (\x -> render x >>= tell >> return mempty) . _eAnimation
     render e = do
-        let (framesRunning,name) = _eAnimState e
+        time <- asks _wTimeI
+        let (framestamp,name) = _eAnimState e
+        -- the name refers to a specific AnimBehavior
+        let framesRunning = time - framestamp
         let spr = _eSprite e
-        let computeBeha (Still frameid) = frameid
-        let computeBeha (Changing frames) = let (_,diff) = divMod framesRunning (Sq.length frames) in Sq.index frames diff
-        let computeBeha (Dynamic len lst) = BlankFrame -- chickening out
-        let frameid =  maybe BlankFrame computeBeha $ M.lookup name (_eAnim e)
+        let computeBeha (Still frameid) = frameid           -- I believe this part will work
+        let computeBeha (Changing len frames) = let diff = mod (div framesRunning len) (Sq.length frames) in Sq.index frames diff
+        let computeBeha (Dynamic len lst) = "BlankFrame" -- chickening out
+        -- the above function computes an animhehavior. the below one chooses one
+        let frameid =  maybe "BlankFrame" computeBeha $ M.lookup name (_eAnim e)
         let frame = maybe (sprDef spr) id $ M.lookup frameid (sprFrames spr) 
         let dis = cmult (24,24) $ _eMapCoord e
         return $ GreatImage dis (delay frame)
@@ -483,7 +492,7 @@ renderOneLineTextBox sh@(Z:.x) string = do
     let background = GreatImage (0,0) $ rect (sh:.20)
     text <- return . mapImage (extract (Z:.0:.0) (Z:.x-2:.20-2)) =<< render string
     text1 <- render string
-    return $ printThing "a"
+    return $ printThing "a" "a"
     return $ background <> text
 
 instance Renderable [Char] where
@@ -493,10 +502,11 @@ instance Renderable [Char] where
 instance Renderable Char where
     render char = do -- return mempty --this is where I actually chicken out
         let (x,y) = (9,16) `cmult` (maybe (0,2) id $ M.lookup char charTable)
-        return $ printThing $ M.lookup char charTable
+        return $ printThing " " $ show $ M.lookup char charTable
         img <- asks _wFontmap
         return $ GreatImage (0,0) $ extract (Z:.x:.y) (Z:.9:.16) img
-printThing = unsafePerformIO . print
+printThing :: Show b => String -> b -> String
+printThing a = unsafePerformIO . (\x -> putStrLn x >> return a) . (a<>) . show
 {-# NOINLINE printThing #-}
 
 
@@ -510,7 +520,7 @@ printThing = unsafePerformIO . print
 
 
 stepper :: Float -> W -> IO W
-stepper t w = flip execStateT w $ step t
+stepper t w = flip execStateT w $ step1 t
 
 step :: Float -> StateT W IO ()
 step time = do
@@ -524,20 +534,33 @@ step1 time = do --undefined
     modify (wTime %~ (+time))
     modify (wTimeI %~ (+1))
     --oh god, input
-    (Keyset pollKeys togggleKeys) <- gets _wKeyset
+    (Keyset pollKeys toggleKeys) <- gets _wKeyset
     let toggle True = False
     let toggle False = True
     -- this part doesn't do the right thing if there are multiple j's in the queue
-    if (elem (Char 'j') toggleKeys) then
+    if (elem (Down,Char 'j') toggleKeys) then
         modify (wUI %~ (uiShow %~ toggle))
         else return ()
-
+    sprites <- gets _wSprites
     time <- gets _wTimeI
-    if time == 10 then do
+    --liftIO $ putStrLn (' ':show time)
+    if time == 4 then do
         liftIO $ putStrLn "Adding character"
-        
+        let player = Entity {
+            _eName = "player",
+            _eType = trace "type evaluated" PlayerEnt,
+            _eSprite = maybe defaultSprite id (M.lookup "player" sprites),
+            _eAnim = maybe mempty id $ M.lookup "player" animationMap,
+            _eMapCoord = trace "coord evaluated" (3,3),
+            _eDirection = Updir, --not actually used yet
+            _eAnimState = (4,"default"), -- since what time it's been that way, what way it is
+            _eMovementExp = 4 } -- hah, I won't use that until movements can only happen once every few frames 
+        modify (wEntities %~ (player:))
+    else return ()
+    gets _wEntities >>= (liftIO . putStrLn) . show . length
+    --    modify (wEntities %~ (player:))
     -- this will affect the UI and such too; not limited to modifying the ents
-    modify . set wEntities =<< mapM modEnt =<< mapM modPlayer =<< gets _wEntities 
+    modify . (wEntities .~) =<< mapM modEnt =<< mapM modPlayer =<< gets _wEntities 
 
 
 modPlayer e = 
@@ -546,9 +569,23 @@ modPlayer e =
         time <- gets _wTimeI
         case _uiMode ui of
             "textmode" -> return e
-            "normal" -> if _eMovementExp e + 5 >= time 
-                then do return e --sampleKeys
-                else return e -- don't read from input, don't collect keys. 
+            "normal" -> --if _eMovementExp e + 5 >= time 
+                --then do return e --sampleKeys
+                --else return e -- don't read from input, don't collect keys. 
+                do
+                    polls <- gets (kPollKeys . _wKeyset)
+                    let dir = sampleDirections polls
+                    case dir of
+                        --Nothing -> return ()
+                        --Just 'w' -> modify (wEntities %~ (eMapCoord %~ (\(x,y) -> (x,y+1))))
+                        --Just 'a' -> modify (wEntities %~ (eMapCoord %~ (\(x,y) -> (x-1,y))))
+                        --Just 'r' -> modify (wEntities %~ (eMapCoord %~ (\(x,y) -> (x,y-1))))
+                        --Just 's' -> modify (wEntities %~ (eMapCoord %~ (\(x,y) -> (x+1,y))))
+                        Nothing -> return e
+                        Just (Char 'w') -> return $ (eMapCoord %~ (\(x,y) -> (x,y+1))) e
+                        Just (Char 'a') -> return $ (eMapCoord %~ (\(x,y) -> (x-1,y))) e
+                        Just (Char 'r') -> return $ (eMapCoord %~ (\(x,y) -> (x,y-1))) e
+                        Just (Char 's') -> return $ (eMapCoord %~ (\(x,y) -> (x+1,y))) e
             _ -> return e
     where  
         --sampleKeys = do
@@ -556,11 +593,11 @@ modPlayer e =
             -- wait a minute, I'm going to have to implement key toggling somehow for these
             -- so the keyset will hold a set of keys that will be sampled, and a set of keys that will need to be toggled
             --case 
-        --sampleDirections = do
-        --    case msum $ map refer $ map Char ['w','a','r','s'] of
-        --        Nothing -> 
-        --        Just a 
-        --          | 
+        sampleDirections :: S.Set Key -> Maybe Key
+        sampleDirections keys = -- so how do I refer and what do I refer to
+            case msum $ map (\x -> if S.member x keys then Just x else Nothing) $ map Char ['w','a','r','s'] of
+                Nothing -> Nothing
+                Just a -> Just a
 
 modEnt e = do
     ui <- gets _wUI
@@ -568,6 +605,7 @@ modEnt e = do
         PlayerEnt -> return e
         _ -> case _uiMode ui of
             "textmode" -> return e
+            "normal" -> return e -- depends what type of ent it is here for what it does
             _ -> return e 
             -- this will make them move every so often and such
 
@@ -601,9 +639,23 @@ eventManage e = do
 
 
 
+-- Some bulky things that would be a little inconvenient to put in another file
+
+animationMap = M.fromList $
+    ("player", player)
+    :("dot", dot)
+    :[]
+
+player :: Animation
+player = M.fromList [("default",Changing 4 (Sq.fromList ["f1,f2,f1,f3"]))]
+
+dot :: Animation
+dot = M.fromList [("default",Still "get the default frame, doofus")]
 
 
 
+defaultSprite :: Sprite
+defaultSprite = Sprite emptyTile mempty
 
 
 
