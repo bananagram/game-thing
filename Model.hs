@@ -30,7 +30,6 @@ module Model (
 
 where
 
-import Species
 import Chars
 import Shapes
 
