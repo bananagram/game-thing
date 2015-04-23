@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.0" orientation="orthogonal" renderorder="right-down" width="100" height="100" tilewidth="16" tileheight="16">
+ <tileset firstgid="1" name="tileset_johto" tilewidth="16" tileheight="16">
+  <image source="tileset_johto.bmp" width="128" height="7504"/>
+ </tileset>
+ <tileset firstgid="3753" name="tileset_johto1" tilewidth="16" tileheight="16">
+  <image source="tileset_johto.bmp" trans="000000" width="128" height="7504"/>
+ </tileset>
+ <layer name="Tile Layer 1" width="100" height="100">
+  <data encoding="base64" compression="zlib">
+   eJzt2E1OwzAQBlAjR6IbuoP73wEOSCMREQ2ewKLjVuU9yUrjdhH56/gnrV3f067F+30/9UZjv7b+1WJO1DiqhR6u6qReHOel/Z6FPGpkc9SWw9K+85FHvVFdrNc+6JNFvSyPZXCvPuqN5qHR2MtjjjjOS/I5zmMyqZHlEeer9fp+so5Uy9bsUR7bfqs1eVSIZ76j9XyfhyxqZHl8nPO1ZLs+X9rpBs/8yI7W7dgfa+Pl0s7zH/mhZXvaeN7Y7re6Wdvrpb3d4JkfWfaeZOUsOF92Foy14cwxx9Hedt/fB31c39J+7m1H60nMgxrxP5/tp3r4DTVG81Kcu3ozT83yl3cjPXxHnWy+2uewrxlqHZ3PY03IY47sTBj3XsyT5dFv+VD/nDzui/dT90UeAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUOMTGdMFdQ==
+  </data>
+ </layer>
+ <layer name="Tile Layer 2" width="100" height="100">
+  <data encoding="base64" compression="zlib">
+   eJzt1EEKwjAUBNCcIPe/RQUDrYqCdWW9lL+ooG4Ff5X3YAh0VWZISgEAAD7R1VJWNfsveOhji8Eei7GPLQ72AH5Eq6/nrPOGpVjXW96/8R2b6Hob2d07n7tv+k9zjO7HyOlpA3vkOUf3U+Rij0WzSb7mjgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwB67MbRW/
+  </data>
+ </layer>
+ <layer name="Tile Layer 3" width="100" height="100">
+  <data encoding="base64" compression="zlib">
+   eJztzgENAAAIA6AnsH8icxlDNyEBCQAAAAAAcFXX9gAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP4ZVgQA1Q==
+  </data>
+ </layer>
+</map>
