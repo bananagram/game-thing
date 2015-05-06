@@ -65,10 +65,10 @@ loadEasyMap = do
     let tiledMapPath = "assets/map.tmx"
     let emptyPixel = (1,1,1) :: (Word8,Word8,Word8)
     -- put that image in there or else
-    (Right img) <- readImageFromBMP tilesetImagePath
+    --(Right img) <- readImageFromBMP tilesetImagePath
     -- img :: Array U DIM2 (Word8,Word8,Word8)
     -- img4 :: Tilearr
-    let img4 = computeUnboxedS $ flipHV $ alphatize img
+    img4 <- readImageFromBMP tilesetImagePath >>= return . computeUnboxedS . alphatize . flipHV . transpose . either (error . show) id
     -- put that map in there or else
     map <- loadMapFile tiledMapPath
     -- I will only use the first layer
@@ -84,24 +84,25 @@ initTileset :: Tilearr -> ATileset
 initTileset image = 
     let arr = delay image
         (Z:.w:.h) = extent arr
-        -- width and height in tiles
-        wTiles = fst (divMod w 24) + if (snd (divMod w 24)) == 0 then 0 else 1
-        hTiles = fst (divMod h 24) + if (snd (divMod h 24)) == 0 then 0 else 1
+        -- number of tiles wide and high. the if is so even one pixel will make a new tile
+        wTiles = let (primary,rem) = divMod w 24 in primary + if rem == 0 then 0 else 1
+        hTiles = let (primary,rem) = divMod h 24 in primary + if rem == 0 then 0 else 1
         f :: Word32 -> (Int,Int) 
         -- result is how many tiles down, how many tiles to the right
         f word = let (h',w') = divMod (fromIntegral word - 1) wTiles in (h',w')
         g :: (Int,Int) -> Tilearr
         -- result is delicious image data
         g (h,w) = computeUnboxedS $ extract (Z:.w*24:.h*24) (Z:.24:.24) arr
-    in  ATileset (g . f)
+    in  ATileset (g . f) -- maybe I should compute this once and make a map...but this is easier
 
 loadFontmap :: IO Pixelarr
 loadFontmap = do
-    img <- readImageFromBMP "assets/fontmap.bmp" >>= return . flipHV . transpose . either (error . show) id
-    let img4 = computeUnboxedS {-$ addLines-} $ alphatize img
-    return $ delay img4
+    img4 <- readImageFromBMP "assets/fontmap.bmp" >>= return . delay . computeUnboxedS . alphatize . flipHV . transpose . either (error . show) id
+    --let img4 = computeUnboxedS {-$ addLines-} $ alphatize img
+    return img4
 
 
+-- flipv might be more accurate
 flipHV arr = 
     let (Z:.x0:.y0) = extent arr
     in  backpermute (Z:.x0:.y0) (\(Z:.x:.y) -> (Z:.x:.y0-y)) arr

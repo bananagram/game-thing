@@ -5,26 +5,28 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE BangPatterns #-}
 
+
+-- exporting way too much stuff
+
 module Model (
     W(..),
     EasyMap(..), --GameMap(..), DungeonMap(..),
     ATileset(..),
-    Entity(..), -- EntityID, EntityID will just be an Int
+    Entity(..), EntType(..), -- EntityID, EntityID will just be an Int
     Sprite(..), FrameID(..),
     --AISetting(..), StatChange(..), StatName(..), TrapTile(..),
-    Coord, cmult, cadd, cshift,
-    Renderable, render, renderAt,
-    liftParr, liftTarr, 
-    renderWorld,
+    Coord, cmult, cadd, cshift, cplace,
+    --liftParr, liftTarr, 
     Tilearr, Pixelarr, Colorarr, GreatImage(..), Pixel(..),
     tarr2parr, parr2tarr, parr2carr, pix2col,
+    mapImage, moveImage, expandImg, 
     emptyTile, emptyTileP,
-    Animation(..), AnimBehavior,
-    UI(..),
+    Animation(..), AnimBehavior(..),-- animationMap,
+    UI(..), UIMode(..),
     Keyset(..),
     Action(..), Direction(..),
-    stepper, eventManager,
-    mash, mashMany, mergePixel, withinBounds,
+    stepper, eventManager
+    --mash, mashMany, mergePixel, withinBounds,
 )
 
 where
@@ -36,14 +38,14 @@ import Data.Tiled
 --import Data.Functor
 import Control.Applicative
 import Data.Monoid hiding (Any,All)
-import qualified Data.Map as M
-import Data.Map (Map)
---import qualified Data.IntMap as IM
---import Data.IntMap (IntMap)
-import Data.Array.Repa hiding (map)
+import Data.Array.Repa hiding (map,(++))
 import qualified Data.Array.Repa as Repa
 import Data.Word
 import Graphics.Gloss.Interface.IO.Game
+--import qualified Data.IntMap as IM
+--import Data.IntMap (IntMap)
+import qualified Data.Map as M
+import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
 import qualified Data.Sequence as Sq
@@ -54,8 +56,8 @@ import Control.Monad.Reader hiding (Any,All)
 import Control.Monad.Writer hiding (Any,All)
 import Control.Monad.State
 import Control.Lens hiding (traverse)
-import System.IO.Unsafe
-import Debug.Trace
+--import System.IO.Unsafe
+--import Debug.Trace
 -- wtf man, why doesn't this work?
 --{-# LANGUAGE TupleSections #-}
 --a = (1,)
@@ -73,6 +75,7 @@ data W = W -- Game state
     , _wEvents :: Seq Event  --shall be cleared every tick
     , _wKeyset :: Keyset  --shall be updated every time a key changes state
     --, wFloor :: Int
+    , _wPlayer :: Entity  -- need to keep it here to keep it easy
     , _wEntities :: [Entity] -- I will store the entities in the world.
     -- I could make entities a Set, and they would be ordered by their numerical ID. just need to make sure I have a good number generation algorithm
     --, wPlayer :: Int -- the ID of the player for ...nah, no convenience yet
@@ -81,6 +84,7 @@ data W = W -- Game state
     , _wMap :: !EasyMap --DungeonMap -- there is only one map at a time for now
     , _wSprites :: !(M.Map String Sprite) --the string is the easier identifier
     , _wFontmap :: !Pixelarr
+    , _wWindowSize :: Coord
     --wLayers :: [Layer], --uh, do I put the map here? easier to access it from here, same with entities
     -- Image data
     --wName2tile :: M.Map String Tilearr, --I think. name of tile to array of tile
@@ -154,6 +158,7 @@ type Pixelarr = Array D DIM2 Pixel
 -- eh, intermediate type.
 type Colorarr = Array D DIM2 Color
 
+
 data GreatImage = GreatImage 
     { gimLoc :: Coord
     , gimData :: Pixelarr}
@@ -179,7 +184,7 @@ data AnimBehavior =
 data Entity = Entity
     { _eName :: String --will be used to identify player definitely
     , _eType :: EntType
-    --, eID :: Int -- this shall be what identifies each entity. I will map over the entity sequence to get the right entity
+    , eUID :: UID -- this shall be what identifies each entity. I will map over the entity sequence to get the right entity
     --, eSpecies :: SpeciesName 
     --eStatChanges :: [StatChange],
     , _eSprite :: Sprite --though it can be inferred, better to carry it around
@@ -188,14 +193,17 @@ data Entity = Entity
     -- Temp datas
     , _eMapCoord :: Coord
     , _eDirection :: Direction
-    , _eAnimState :: (Int,String)
-    , _eMovementExp :: Int
+    , _eAnimState :: (Int,String) -- the frame number it started at and the behavior it's using
+    , _eMovementExp :: Maybe Int -- the frame where the current movement will expire and movement can be regained
 }
+
+type UID = Int
 
 
 data EntType = 
     PlayerEnt
     | StationaryTalkableNPCEnt
+    | OtherEnt
     deriving (Show,Eq)
 
 
@@ -230,11 +238,19 @@ type FrameID = String
 -- what would be in the UI? 
 -- and no point to rendering the UI before centering the world.
 data UI = UI 
-    { _uiMode :: String -- if the string doesn't match in the case, it's displayed at the top
+    { _uiMode :: UIMode -- if the string doesn't match in the case, it's displayed at the top
     , _uiListPlace :: Int
     , _uiShow :: Bool
     , _uiSampleText :: String
     } deriving (Show)
+
+-- it's perfectly good to store relevant data in the ui mode
+data UIMode = Normal 
+    -- the id, the id of the location in the dialogue. 
+    -- if text loaded slowly it would include the ticks until the loading finished. it could be canceled with a
+        -- see, I can plan design here
+    | TextMode UID String
+    deriving (Show)
 
 
 data Keyset = Keyset 
@@ -266,6 +282,14 @@ data Direction =
     deriving (Show,Eq,Ord)
 
 
+type DiaRef = String
+type Dialogue = M.Map DiaRef DiaComponent
+
+data DiaComponent =
+    DiaText DiaRef String
+    | DiaEnd
+    -- | DialogueOptions
+    deriving (Show)
 
 
 makeLenses ''W
@@ -296,77 +320,6 @@ makeLenses ''Entity
 -- Image data
 --------------------------------------------------------------------------------
 
--- This is a reader for every element that requires access to the world bank of image data.
--- Note that I had to turn on FlexibleContexts to be able to use this...failed as just Reader and with MonadReader r m.
-class Renderable a where
-    -- here, b doesn't matter but it cares about b anyway...
-    -- if I made them write their contents wherever rather than return it, I couldn't return anything to be processed otherwise...
-    -- if I kept the option to tell or return open, I would have to return mempty a lot and it might be inconsistent...
-    -- second option is the only option...
-    -- it is a little inconsistent but it works fine.
-    -- note that I should keep the Writer to renderWorld and make render only return image data
-    render :: (MonadReader W m, MonadIO m) => {-forall b.-} a -> m GreatImage
-    renderAt :: (MonadReader W m, MonadIO m) => {-forall b.-} Coord -> a -> m GreatImage
-    renderAt c1 a = render a >>= return . moveImage c1
-    --render :: (Monad m) => a -> ReaderT W m GreatImage
-    --renderAt :: MonadReader W m => Coord -> a -> m GreatImage
-
-liftParr :: Pixelarr -> GreatImage
-liftParr = GreatImage (0,0)
-liftTarr :: Tilearr -> GreatImage
-liftTarr = GreatImage (0,0) . tarr2parr
-
--- Leaving the reader off this for convenience in my rendering function.
-imageTarr :: Tilearr -> GreatImage
-imageTarr = GreatImage (0,0) . tarr2parr
-
--- {-
---instance Renderable W where
---    render w = execWriterT $ do
-
--- maybe a good idea would be to keep everything Renderable as Reader, then use Writer in this function to write the values returned
-renderWorld :: W -> IO Pixelarr
-renderWorld w = do
-    i <- writtenImage
-    -- not 00 anb 240,240, something decided by the loc. 
-    let i' = expandImg (0,0) (240,240) i
-    --i'' <- computeUnboxedP (gimData i') >>= return . delay
-    return (gimData i')
-    where 
-        writtenImage = flip runReaderT w $ execWriterT $
-        --do 
-            --renderUI
-    {- 
-            arr <- asks (($ 0) . tsMorph . emapTileset . _wMap)
-            tell (imageTarr arr)
-            tell (GreatImage (55,0) (delay arr))
-    -}
-            --asks _wFontmap >>= tell . GreatImage (0,0)
-            renderMap >> renderEntities >> renderUI >> extra -- :: (MonadReader W m, MonadWriter GreatImage m) => m GreatImage
-            where     
-                extra :: WriterT GreatImage (ReaderT W IO) ()
-                extra = asks _wTimeI >>= liftIO . print
-                renderMap :: WriterT GreatImage (ReaderT W IO) ()
-                renderMap = do
-                    -- ima write some things
-                    m <- asks $ emapTileGrid . _wMap
-                    (xl,yl) <- asks _wLoc
-                    --asks _wTimeI >>= liftIO . print 
-                    --liftIO $ print m
-                    let f x y = fmap (moveImage (x*24,y*24) . liftTarr) $ M.lookup (x,y) m
-                    tell $ mconcat $ catMaybes $ f <$> [-3..3] <*> [-3..3]
-                    --tell $ f 0 0
-                    --tell $ f 1 1
-                renderEntities :: WriterT GreatImage (ReaderT W IO) ()
-                renderEntities = do
-                    ents <- asks _wEntities
-                    datas <- mapM_ render ents -- I believe this tells them
-                    --mapM (render >>= tell) ents
-                    return ()
-                renderUI :: WriterT GreatImage (ReaderT W IO) ()
-                renderUI = asks _wUI >>= render >>= tell
-{-
--}
 
 
 cmult :: Coord -> Coord -> Coord
@@ -376,8 +329,8 @@ cadd :: Coord -> Coord -> Coord
 cadd (x0,y0) (x1,y1) = (x0+x1,y0+y1)
 cshift :: Coord -> GreatImage -> GreatImage
 cshift c1 (GreatImage c ps) = GreatImage (cadd c c1) ps
-cmove :: Coord -> GreatImage -> GreatImage
-cmove c1 (GreatImage _ ps) = GreatImage c1 ps
+cplace :: Coord -> GreatImage -> GreatImage
+cplace c1 (GreatImage _ ps) = GreatImage c1 ps
 
 tarr2parr :: Tilearr -> Pixelarr
 {-# INLINE tarr2parr #-}
@@ -410,8 +363,6 @@ instance Show GreatImage where
             (mconcat $ intersperse "\n" $ (\y -> mconcat $ intersperse " " $ fmap (\x -> show $ pix ! (Z:.x:.y)) [0..xs-1]) <$> [0..ys-1])
             --for (y or line) in [0..y]
             --    intersperse " " $ fmap (show $ pix ! (Z:.x:.y)) [0..x]
-instance Renderable GreatImage where
-    render = return -- just write them with tell
 placeImage :: Coord -> GreatImage -> GreatImage
 placeImage c1 img = GreatImage c1 (gimData img)
 moveImage :: Coord -> GreatImage -> GreatImage
@@ -431,90 +382,8 @@ instance Show Entity where
 -- if I want to save entities, I'll havbe to make EntitySave and translate to and from to put the sprite back in
 --what other kinds of entities would I want?
 
-instance Renderable Entity where
-    --render = (\x -> render x >>= tell >> return mempty) . _eAnimation
-    render e = do
-        time <- asks _wTimeI
-        let (framestamp,name) = _eAnimState e
-        -- the name refers to a specific AnimBehavior
-        let framesRunning = time - framestamp
-        let spr = _eSprite e
-        let computeBeha (Still frameid) = frameid           -- I believe this part will work
-        let computeBeha (Changing len frames) = let diff = mod (div framesRunning len) (Sq.length frames) in Sq.index frames diff
-        let computeBeha (Dynamic len lst) = "BlankFrame" -- chickening out
-        -- the above function computes an animhehavior. the below one chooses one
-        let frameid =  maybe "BlankFrame" computeBeha $ M.lookup name (_eAnim e)
-        let frame = maybe (sprDef spr) id $ M.lookup frameid (sprFrames spr) 
-        let dis = cmult (24,24) $ _eMapCoord e
-        return $ GreatImage dis (delay frame)
--- change the world time to number of frames, maybe put another time with seconds
-
-
--- RENDERUI RENDUI
-instance Renderable UI where
-    render ui = do --return mempty --chickened out
-        let mode = "displayText" -- _uiMode ui
-        loc@(xl,yl) <- asks _wLoc
-        --charmap <- asks _wFontmap
-        asks _wTimeI >>= renderOneLineTextBox (Z:.40) . show
-        --case mode of
-        --    --"list1" -> write a box, some entries, and a selection rectangle at the specified point in the UI
-        --    -- import these things from Shapes.
-        --    "displayText" -> {-return . placeImage (xl+4,yl+40) =<< -}renderOneLineTextBox (Z:.230) "1234567890123456789012345678901234567890"
-        --    "" -> return mempty
-        --    a -> renderAt (cadd (10,10) loc) a
-    --render ui = do
-    --    if _uiShow ui then do
-    --        tell $ GreatImage (0,0) $ fromFunction (Z:.21:.21) $ (\(Z:.x:.y) -> if x==0 || x==20 || y==0 || y==20 then (255,255,255,255) else (0,0,0,0))
-    --        tell $ GreatImage (0,0) $ fromFunction (Z:.40:.40) $ (\(Z:.x:.y) -> if x==5 || x==30 || y==5 || y==30 then (255,255,255,255) else (0,0,0,0))
-    --        tell $ GreatImage (0,0) $ fromFunction (Z:.50:.50) $ (\(Z:.x:.y) -> if x==16 || x==46 || y==16 || y==46 then (255,255,255,255) else (0,0,0,0))
-    --    else return ()
-
---renderTextBox :: MonadReader W m => Int -> DIM1 -> String -> m GreatImage
---renderTextBox sh@(Z:.x:.y) msg = 
---    let background = GreatImage (0,0) $ rect sh
---        -- hmm, how do I determine how many characters fit?
-    
---    let text = undefined
---    background <> text
-
-renderTwoLineTextBox :: (MonadReader W m, MonadIO m) => DIM1 -> String -> m GreatImage
-renderTwoLineTextBox sh@(Z:.x) string = do
-    let background = GreatImage (0,0) $ rect (sh:.20)
-    --let string1 = if length string > 
-    text <- return . mapImage (extract (Z:.0:.0) (Z:.x-2:.20-2)) =<< render string
-    text1 <- render string
-    return $ background <> text
-
--- shape is the x length. the height is 20, with one pixel of buffer on either side of the text
-renderOneLineTextBox :: (MonadReader W m, MonadIO m) => DIM1 -> String -> m GreatImage
-renderOneLineTextBox sh@(Z:.x) string = do
-    let background = GreatImage (0,0) $ rect (sh:.20)
-    text <- return . mapImage (extract (Z:.0:.0) (Z:.x-2:.20-2)) =<< render string
-    text1 <- render string
-    liftIO $ print "a"
-    --return $ printThing "a" "a"
-    return $ background <> text
-
-instance Renderable [Char] where
-    render str = do {- execWriterT $ -} -- maybe if I leave the Writer in there it'll be processed normally?
-        liftIO $ putStrLn $ "Rendered string: " <> str
-        foldM (\(diff,img) char -> render char >>= \x -> return (diff+1,img <> cshift (9*diff,0) x)) (0,mempty) str >>= return . snd
-
-instance Renderable Char where
-    render char = do -- return mempty --this is where I actually chicken out
-        let (x,y) = (9,16) `cmult` (maybe (0,2) id $ M.lookup char charTable)
-        liftIO $ putStrLn $ "Rendering char: " <> show char
-        liftIO $ print $ "Char looked up: " <> (show $ M.lookup char charTable)
-        img <- asks _wFontmap
-        return $ GreatImage (0,0) $ extract (Z:.x:.y) (Z:.9:.16) img
---printThing :: Show b => String -> b -> String
---printThing a = unsafePerformIO . (\x -> putStrLn x >> return a) . (a<>) . show
---{-# NOINLINE printThing #-}
-
-
 --------------------------------------------------------------------------------
--- Events
+-- The not-quite-so-important(-yet) stepper function. Will be gargantuan by the time it progresses.
 --------------------------------------------------------------------------------
 
 
@@ -547,6 +416,7 @@ step1 time = do --undefined
     sprites <- gets _wSprites
     time <- gets _wTimeI
     --liftIO $ putStrLn (' ':show time)
+    {-
     if time == 4 then do
         liftIO $ putStrLn "Adding character"
         let player = Entity {
@@ -557,22 +427,55 @@ step1 time = do --undefined
             _eMapCoord = trace "coord evaluated" (3,3),
             _eDirection = Updir, --not actually used yet
             _eAnimState = (4,"default"), -- since what time it's been that way, what way it is
-            _eMovementExp = 4 } -- hah, I won't use that until movements can only happen once every few frames 
+            _eMovementExp = Just 4 } -- hah, I won't use that until movements can only happen once every few frames 
         modify (wEntities %~ (player:))
     else return ()
+    -}
     gets _wEntities >>= (liftIO . putStrLn) . show . length
     --    modify (wEntities %~ (player:))
     -- this will affect the UI and such too; not limited to modifying the ents
-    modify . (wEntities .~) =<< mapM modEnt =<< mapM modPlayer =<< gets _wEntities 
+    --modify . (wEntities .~) =<< mapM modEnt =<< mapM modPlayer =<< gets _wEntities 
+    modEnts
+
+modEnts = do
+    player <- gets _wPlayer
+    ents <- gets _wEntities
+    ui <- gets _wUI
+    case _uiMode ui of
+        TextMode uid diaId -> do undefined -- define dialogues
+            --keys <- sample "a" []
+            --if member keys (Char 'a') then do
+            --    let newConv = forwardDia 
+        Normal -> do
+            keys <- sample "wars" []
+            let diff = (if S.member (Char 'a') keys then 1 else 0 + if S.member (Char 's') keys then (-1) else 0, 
+                    if S.member (Char 'w') keys then 1 else 0 + if S.member (Char 'r') keys then (-1) else 0)
+            modify (wPlayer %~ (eMapCoord %~ (cadd diff)))
+            liftIO $ putStrLn $ "moved: " <> show diff <> " from " <> show keys
 
 
+
+
+
+sample :: (MonadState W m) => [Char] -> [SpecialKey] -> m (Set Key)
+sample chars specialKeys = do
+    polls <- gets (kPollKeys . _wKeyset)
+    -- no toggles
+    let keys = map Char chars ++ map SpecialKey specialKeys -- now they'll all be Gloss keys
+    --let f set key = bool set (S.insert key set) $ S.member key polls
+    --foldM f S.empty keys
+    return $ S.intersection (S.fromList keys) polls
+
+
+
+{-
 modPlayer e = 
     if _eType e /= PlayerEnt then return e else do
         ui <- gets _wUI
         time <- gets _wTimeI
         case _uiMode ui of
-            "textmode" -> return e
-            "normal" -> --if _eMovementExp e + 5 >= time 
+            TextMode _ _ -> return e
+            Normal -> --if _eMovementExp e + 5 >= time 
                 --then do return e --sampleKeys
                 --else return e -- don't read from input, don't collect keys. 
                 do
@@ -607,11 +510,12 @@ modEnt e = do
     case _eType e of
         PlayerEnt -> return e
         _ -> case _uiMode ui of
-            "textmode" -> return e
-            "normal" -> return e -- depends what type of ent it is here for what it does
+            TextMode _ _ -> return e
+            Normal -> return e -- depends what type of ent it is here for what it does
             _ -> return e 
             -- this will make them move every so often and such
 
+-}
 
 
 
@@ -640,25 +544,6 @@ eventManage e = do
 
 
 
-
-
--- Some bulky things that would be a little inconvenient to put in another file
-
-animationMap = M.fromList $
-    ("player", player)
-    :("dot", dot)
-    :[]
-
-player :: Animation
-player = M.fromList [("default",Changing 4 (Sq.fromList ["f1,f2,f1,f3"]))]
-
-dot :: Animation
-dot = M.fromList [("default",Still "get the default frame, doofus")]
-
-
-
-defaultSprite :: Sprite
-defaultSprite = Sprite emptyTile mempty
 
 
 
@@ -739,7 +624,6 @@ mash img1@(GreatImage (xd1,yd1) arr1) img2@(GreatImage (xd2,yd2) arr2) =
 
 
 mashMany :: [GreatImage] -> GreatImage
---mashMany = undefined
 mashMany bits = 
     let --coords = fmap (\(GreatImage coord _) -> coord) bits
         --extents = fmap (\(GreatImage _ arr) -> extent arr) bits
@@ -755,8 +639,12 @@ mashMany bits =
         bY = minimum $ fmap (\(GreatImage (_,y) _) -> y) bits
         maxXArr = maximum (fmap (\(_,Z:.x:._) -> x) pairs) -- I don't know which of these is right
         maxYArr = maximum (fmap (\(_,Z:._:.y) -> y) pairs)
-        base = fromFunction (Z:.largestX:.largestY) (const (0,0,0,0))
-        f (GreatImage (xstart,ystart) arr) basearr = 
+        --base = fromFunction (Z:.largestX:.largestY) (const (0,0,0,0))
+        -- the base will envelop all, like the sky around all heavently objects. I can refer to it for sizes
+        base = GreatImage (bX,bY) $ fromFunction (Z:.largestX:.largestY) (const (0,0,0,0))
+        foldingBits = base:reverse bits
+
+        func (GreatImage (xstart,ystart) arr) basearr = 
             let (Z:.xsize:.ysize) = extent arr in
             --backpermuteDft
             --    basearr
@@ -768,9 +656,69 @@ mashMany bits =
                             && view _4 (f (Z:.x-xstart:.y-ystart)) == 255 
                         then f (Z:.x-xstart:.y-ystart)
                         else basearr ! sh)
-        base' = foldr f base (reverse bits)
+        base' = foldr func (gimData base) (reverse bits)
+        
+        --g (GreatImage (xstart0,ystart0) arr) basearr = 
+
+        {-
+        bigFunc (bit:[]) = bit
+        bigFunc (bit0:bit1:bit2:bit3:bts) = 
+            let (GreatImage disp0@(xstart0,ystart0) arr0) = bit0
+                (GreatImage disp1@(xstart1,ystart1) arr1) = bit1
+                (GreatImage disp2@(xstart2,ystart2) arr2) = bit2
+                (GreatImage disp3@(xstart3,ystart3) arr3) = bit3
+                (Z:.xsize0:.ysize0) = extent arr0
+                (Z:.xsize1:.ysize1) = extent arr1
+                (Z:.xsize2:.ysize2) = extent arr2
+                (Z:.xsize3:.ysize3) = extent arr3
+                newArr = traverse4 arr0 arr1 arr2 arr3
+                    --(const $ const $ let  determineMaxes [bit0,bit1]) --not this again :(
+                    -- maybe I'll make it better later
+                    (const $ const $ const $ const $ extent $ gimData base)
+                    (\f g h i sh@(Z:.x:.y) -> 
+                        if (x>=xstart3&&x<xstart3+xsize3&&y>=ystart3&&y<ystart3)
+                            && view _4 (f (Z:.x-xstart3:.y-ystart3)) == 255
+                        then i (Z:.x-xstart3:.y-ystart3)
+                        else
+                            if (x>=xstart2&&x<xstart2+xsize2&&y>=ystart2&&y<ystart2)
+                                && view _4 (g (Z:.x-xstart2:.y-ystart2)) == 255
+                            then h (Z:.x-xstart2:.y-ystart2)
+                            else 
+                                if (x>=xstart1&&x<xstart1+xsize1&&y>=ystart1&&y<ystart1)
+                                    && view _4 (g (Z:.x-xstart1:.y-ystart1)) == 255
+                                then g (Z:.x-xstart1:.y-ystart1)
+                                else 
+                                    if (x>=xstart0&&x<xstart0+xsize0&&y>=ystart0&&y<ystart0)
+                                        && view _4 (g (Z:.x-xstart0:.y-ystart0)) == 255
+                                    then f (Z:.x-xstart0:.y-ystart0)
+                                    else (0,0,0,0))
+            in  bigFunc $ GreatImage (bX,bY) newArr : bts
+        bigFunc (bit0:bit1:bts) = 
+            let (GreatImage disp0@(xstart0,ystart0) arr0) = bit0
+                (GreatImage disp1@(xstart1,ystart1) arr1) = bit1
+                (Z:.xsize0:.ysize0) = extent arr0
+                (Z:.xsize1:.ysize1) = extent arr1
+                newArr = traverse2 arr0 arr1
+                    --(const $ const $ let  determineMaxes [bit0,bit1]) --not this again :(
+                    -- maybe I'll make it better later
+                    (const $ const $ extent $ gimData base)
+                    (\f g sh@(Z:.x:.y) -> 
+                        if (x>=xstart1&&x<xstart1+xsize1&&y>=ystart1&&y<ystart1)
+                            && view _4 (f (Z:.x-xstart1:.y-ystart1)) == 255
+                        then g (Z:.x-xstart1:.y-ystart1)
+                        else
+                            if (x>=xstart0&&x<xstart0+xsize0&&y>=ystart0&&y<ystart0)
+                                && view _4 (g (Z:.x-xstart0:.y-ystart0)) == 255
+                            then f (Z:.x-xstart0:.y-ystart0)
+                            else (0,0,0,0))
+            in  bigFunc $ GreatImage (bX,bY) newArr : bts
+
+
+        newImg = bigFunc foldingBits
+        -}
     in
         GreatImage (bX,bY) base'
+        --newImg
 
 
 {-

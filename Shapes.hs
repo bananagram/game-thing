@@ -15,3 +15,9 @@ rect (Z:.xd:.yd) = fromFunction (Z:.xd:.yd) (\(Z:.x:.y) -> if x == 0 || y == 0 |
 menuBorder :: DIM2 -> Pixelarr
 menuBorder = rect
 
+--getRekt :: Pixelarr
+--getRekt = rect (Z:.60:.60)
+
+
+
+
