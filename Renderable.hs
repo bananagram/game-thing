@@ -7,6 +7,11 @@
 
 
 
+-- This file now holds all the rendering data. Now I don't have to recompile Model until
+-- I make changes to the world type.
+
+
+
 module Renderable (
     Renderable, --render, renderAt,
     renderWorld

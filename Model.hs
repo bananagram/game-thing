@@ -317,7 +317,8 @@ makeLenses ''Entity
 --    FailedTrap deriving (Show,Read,Eq,Ord)
 
 --------------------------------------------------------------------------------
--- Image data
+-- Just a bunch of helper functions for GreatImage and such, as well as making types instances of classes.
+-- This is hardly Model.hs anymore...more like Types.hs like it used to be called.
 --------------------------------------------------------------------------------
 
 
@@ -382,11 +383,15 @@ instance Show Entity where
 -- if I want to save entities, I'll havbe to make EntitySave and translate to and from to put the sprite back in
 --what other kinds of entities would I want?
 
+
+
+
+
+
+
 --------------------------------------------------------------------------------
 -- The not-quite-so-important(-yet) stepper function. Will be gargantuan by the time it progresses.
 --------------------------------------------------------------------------------
-
-
 
 
 
