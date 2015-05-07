@@ -13,7 +13,7 @@
 
 
 module Renderable (
-    Renderable, --render, renderAt,
+    Renderable,
     renderWorld
 ) where
 
@@ -102,7 +102,8 @@ renderWorld w = do
                 renderUI = do
                     (xl,yl) <- asks _wLoc
                     (xwin,ywin) <- asks _wWindowSize
-                    asks _wUI >>= render >>= return . cshift (xwin `div` 2 + xl*24, ywin `div` 2 + yl*24) >>= tell
+                    rendered <- asks _wUI >>= render
+                    tell $ cshift (xwin `div` 2 + xl*24, ywin `div` 2 + yl*24) rendered
 
 
 
